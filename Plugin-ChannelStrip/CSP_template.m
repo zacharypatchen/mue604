@@ -12,6 +12,15 @@ classdef CSP_template < audioPlugin
         RELEASE = 50;
         RATIO = 2;
         THRESHOLD = -10;
+
+         % EQ parameters
+        LF_SHELF = 100;
+        MF_FREQ = 1000;
+        HF_SHELF = 8000;
+
+        LF_GAIN = 0;
+        MF_GAIN = 0;
+        HF_GAIN = 0;
     end
 
     properties (Constant)
@@ -54,18 +63,52 @@ classdef CSP_template < audioPlugin
                 'Label', ':1', ...
                 'Mapping', {'int', 1, 12}...
                 )...%end of param
-            )...% end of interface 
+                 ,audioPluginParameter('LF_SHELF',...
+                'DisplayName', 'LF Shelf',...
+                'Label', 'Hz',...
+                'Mapping', {'log', 20, 400}), ... % end of parameter
+            audioPluginParameter('LF_GAIN',...
+                'DisplayName', 'LF Gain',...
+                'Label', 'dB',...
+                'Mapping', {'lin', -15, 15}), ... % end of parameter
+            audioPluginParameter('MF_FREQ',...
+                'DisplayName', 'MF Freq',...
+                'Label', 'Hz', ...
+                'Mapping', {'log', 200, 8000}), ... % end of parameter
+            audioPluginParameter('MF_GAIN',...
+                'DisplayName', 'MF Gain',...
+                'Label', 'dB',...
+                'Mapping', {'lin', -15, 15}), ... % end of parameter
+            audioPluginParameter('HF_SHELF',...
+                'DisplayName', 'HF Shelf',...
+                'Label', 'Hz',...
+                'Mapping', {'log', 2000, 16000}), ... % end of parameter
+            audioPluginParameter('HF_GAIN',...
+                'DisplayName', 'HF Gain',...
+                'Label', 'dB',...
+                'Mapping', {'lin', -15, 15}))  
+        % end of interface
         
     end
 
     properties (Access = private)
         %internal filter variables, such as coefficient values
         FS = 44100;
-        
+        compressor;
+         EQ;
     end
     
     methods
         function plugin = CSP_template()
+             % Initialize Compressor
+            plugin.compressor = compressor('MakeUpGainMode','Auto');
+            updateCompressor(plugin);
+plugin.EQ = multibandParametricEQ('SampleRate', plugin.FS, ...
+                'NumEQBands', 3, ...
+                'SampleRate', plugin.FS,...
+                'Frequencies', [plugin.LF_SHELF, plugin.MF_FREQ, plugin.HF_SHELF], ...
+                'PeakGains', [plugin.LF_GAIN, plugin.MF_GAIN, plugin.HF_GAIN]...
+                );
             % Do any initializing that needs to occur BEFORE the plugin runs
 
 
@@ -73,8 +116,10 @@ classdef CSP_template < audioPlugin
 
         function out = process(plugin,in)
             % DSP section
-            gain = db2mag(plugin.GAIN_DB);
-            out = gain * in;
+            %gain = db2mag(plugin.GAIN_DB);
+            %out = gain * in;
+
+            out = plugin.compressor(in) +plugin.EQ(in);
             
         end
         
@@ -92,7 +137,69 @@ classdef CSP_template < audioPlugin
 
 
         end
-       
+        function set.LF_SHELF(plugin, val)
+            plugin.LF_SHELF = val;
+            updateEQ(plugin);
+        end
+
+        function set.LF_GAIN(plugin, val)
+            plugin.LF_GAIN = val;
+            updateEQ(plugin);
+        end
+
+        function set.MF_FREQ(plugin, val)
+            plugin.MF_FREQ = val;
+            updateEQ(plugin);
+        end
+
+        function set.MF_GAIN(plugin, val)
+            plugin.MF_GAIN = val;
+            updateEQ(plugin);
+        end
+
+
+        function set.HF_SHELF(plugin, val)
+            plugin.HF_SHELF = val;
+            updateEQ(plugin);
+        end
+
+        function set.HF_GAIN(plugin, val)
+            plugin.HF_GAIN = val;
+            updateEQ(plugin);
+        end
+
+
+        function updateEQ(plugin)
+            plugin.EQ.Frequencies = [plugin.LF_SHELF, plugin.MF_FREQ, plugin.HF_SHELF];
+            plugin.EQ.PeakGains = [plugin.LF_GAIN, plugin.MF_GAIN, plugin.HF_GAIN];
+        end
+        
+       function set.THRESHOLD(plugin, val)
+            plugin.THRESHOLD = val;
+            updateCompressor(plugin);
+        end
+
+        function set.RATIO(plugin, val)
+            plugin.RATIO = val;
+            updateCompressor(plugin);
+        end
+
+        function set.ATTACK(plugin, val)
+            plugin.ATTACK = val;
+            updateCompressor(plugin);
+        end
+
+        function set.RELEASE(plugin, val)
+            plugin.RELEASE = val;
+            updateCompressor(plugin);
+        end
+
+        function updateCompressor(plugin)
+            plugin.compressor.Threshold = plugin.THRESHOLD;
+            plugin.compressor.Ratio = plugin.RATIO;
+            plugin.compressor.AttackTime = plugin.ATTACK/1000;
+            plugin.compressor.ReleaseTime = plugin.RELEASE/1000;
+        end
         
     end
 end
