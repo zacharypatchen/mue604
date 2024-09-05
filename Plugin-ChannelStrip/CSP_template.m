@@ -29,6 +29,8 @@ classdef CSP_template < audioPlugin
         OVERLAP = 0.01;
         %Pitch Mix
         PITCHSHIFT_MIX = 50.0;
+
+
     end
 
     properties (Constant)
@@ -192,6 +194,8 @@ classdef CSP_template < audioPlugin
         compressor;
         EQ;
         PitchShifter;
+
+        
     end
     
     methods
@@ -202,7 +206,7 @@ classdef CSP_template < audioPlugin
             plugin.compressor = compressor('MakeUpGainMode','Auto');
             updateCompressor(plugin);
             % Initialize EQ
-plugin.EQ = multibandParametricEQ('SampleRate', plugin.FS, ...
+            plugin.EQ = multibandParametricEQ('SampleRate', plugin.FS, ...
                 'NumEQBands', 3, ...
                 'SampleRate', plugin.FS,...
                 'Frequencies', [plugin.LF_SHELF, plugin.MF_FREQ, plugin.HF_SHELF], ...
@@ -217,10 +221,18 @@ plugin.EQ = multibandParametricEQ('SampleRate', plugin.FS, ...
             % DSP section
             %gain = db2mag(plugin.GAIN_DB);
             %out = gain * in;
-            pitchShift = (plugin.PitchShifter(in*(plugin.PITCHSHIFT_MIX/100.0)));
-            comp = (plugin.compressor(in * (plugin.COMP_MIX/100.0)+pitchShift));
-            eq = plugin.EQ(comp);
-            out =  eq ;
+        out1 = coder.nullcopy(zeros(size(in)));
+        out2 = coder.nullcopy(zeros(size(in))); 
+        out3 = coder.nullcopy(zeros(size(in,1),2));
+
+        out = coder.nullcopy(zeros(size(in)));
+
+        out1(:,:) = (plugin.PitchShifter(in*(plugin.PITCHSHIFT_MIX/100.0)));
+        out2(:,:) = (plugin.compressor(in * (plugin.COMP_MIX/100.0)+out1));
+        out3(:,:) = plugin.EQ(out2);
+
+          %  out(:,:) = (out3(:,1)+out3(:,2))/2;
+            out = out3;
             
         end
         
