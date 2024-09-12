@@ -22,6 +22,7 @@ classdef MrShifty < audioPlugin
         PITCHSHIFT_MIX = 50.0;
         %Drive
         DRIVE = 50.0;
+        
     end
 
     properties (Constant)
@@ -143,9 +144,9 @@ PluginInterface = audioPluginInterface(...
                 'Layout', [5,3 ; 6,5],...
                 'DisplayNameLocation', 'above',...
                 'Label', '%',...
-                'Mapping', {'lin', 1.0, 100.0}, ...
+                'Mapping', {'lin', 0, 100.0}, ...
                 'Filmstrip', 'BigKnob.png',...
-                'FilmstripFrameSize', [128 128]),...
+                'FilmstripFrameSize', [89 8989]),...
                 audioPluginParameter('PITCHSHIFT_MIX',...
                 'DisplayName', 'Shiftyness',...
                 'Style', 'rotaryknob',...
@@ -153,8 +154,8 @@ PluginInterface = audioPluginInterface(...
                 'DisplayNameLocation', 'above',...
                 'Label', '%',...
                 'Mapping', {'lin', 1.0, 100.0}, ...
-                'Filmstrip', '76_bender.png',...
-                'FilmstripFrameSize', [18 7676]),...
+                'Filmstrip', 'BigKnob.png',...
+                'FilmstripFrameSize', [89 8989]),...
                 'BackgroundColor',[135/255, 0, 0])
         % end of interface
     end
@@ -164,6 +165,9 @@ PluginInterface = audioPluginInterface(...
         FS = 44100;
         EQ;
         PitchShifter;
+        Vt = 0.0253;% thermal voltage
+        eta = 1.68; %emission coefficient
+        Is = 0.105; % saturation current
     end
 
     methods
@@ -188,16 +192,23 @@ plugin.EQ = multibandParametricEQ('SampleRate', plugin.FS, ...
             %gain = db2mag(plugin.GAIN_DB);
             %out = gain * in;
         out1 = coder.nullcopy(zeros(size(in)));
-        %out2 = coder.nullcopy(zeros(size(in))); 
+        out2 = coder.nullcopy(zeros(size(in))); 
         out3 = coder.nullcopy(zeros(size(in,1),2));
 
         out = coder.nullcopy(zeros(size(in)));
 
         out1(:,:) = (plugin.PitchShifter(in*(plugin.PITCHSHIFT_MIX/100.0)));
-        %out2(:,:) = (plugin.compressor(in * (plugin.COMP_MIX/100.0)+out1));
-        out3(:,:) = plugin.EQ(out1);
+        
+        %diode clipping
+            N = length(in);
+            for n = 1:N
+                out2(n,1) = (plugin.Is * (exp(((plugin.DRIVE/100)+0.1)* in(n,1)/(plugin.eta * plugin.Vt))-1));
+            end
 
-        %  out(:,:) = (out3(:,1)+out3(:,2))/2;
+        
+        %EQ processing
+        out3(:,:) = plugin.EQ(out1 + out2);
+
             out = out3;
             
         end
@@ -210,6 +221,8 @@ plugin.EQ = multibandParametricEQ('SampleRate', plugin.FS, ...
 
             
         end
+
+   
         
         function set.PITCHSHIFT(plugin, val)
             plugin.PITCHSHIFT = val;
@@ -266,6 +279,7 @@ plugin.EQ = multibandParametricEQ('SampleRate', plugin.FS, ...
         function set.DRIVE(plugin, val)
             plugin.DRIVE = val;
         end
+
         function set.PITCHSHIFT_MIX(plugin, val)
             plugin.PITCHSHIFT_MIX = val;
         end
