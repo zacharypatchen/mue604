@@ -173,9 +173,9 @@ PluginInterface = audioPluginInterface(...
         Is = 0.105;
 
         % Filter structures with persistent variables
-        lowFreqFilter = struct('w', [0 0], 'a0', 1, 'a1', 0, 'a2', 0, 'b0', 1, 'b1', 0, 'b2', 0, 'x1', 0, 'x2', 0, 'y1', 0, 'y2', 0);
-        midFreqFilter = struct('w', [0 0], 'a0', 1, 'a1', 0, 'a2', 0, 'b0', 1, 'b1', 0, 'b2', 0, 'x1', 0, 'x2', 0, 'y1', 0, 'y2', 0);
-        highFreqFilter = struct('w', [0 0], 'a0', 1, 'a1', 0, 'a2', 0, 'b0', 1, 'b1', 0, 'b2', 0, 'x1', 0, 'x2', 0, 'y1', 0, 'y2', 0);
+        lowFreqFilter = struct('w', [0 0 ; 0 0], 'a0', 1, 'a1', 0, 'a2', 0, 'b0', 1, 'b1', 0, 'b2', 0, 'x1', 0, 'x2', 0, 'y1', 0, 'y2', 0);
+        midFreqFilter = struct('w', [0 0 ; 0 0], 'a0', 1, 'a1', 0, 'a2', 0, 'b0', 1, 'b1', 0, 'b2', 0, 'x1', 0, 'x2', 0, 'y1', 0, 'y2', 0);
+        highFreqFilter = struct('w', [0 0 ; 0 0], 'a0', 1, 'a1', 0, 'a2', 0, 'b0', 1, 'b1', 0, 'b2', 0, 'x1', 0, 'x2', 0, 'y1', 0, 'y2', 0);
     end
 
     methods
@@ -196,10 +196,18 @@ PluginInterface = audioPluginInterface(...
             shiftedSignal = plugin.PitchShifter(in);
             pitchMixed = (1 - mixFactor) * in + mixFactor * shiftedSignal;
 
-            % Diode clipping
-            clipped = plugin.Is * (exp(((plugin.DRIVE / 100 + 0.1) * pitchMixed) / (plugin.eta * plugin.Vt)) - 1);
+            % Diode clipping 
+            clipped = zeros(size(pitchMixed)); % Preallocate the clipped signal
+
+            for n = 1:length(pitchMixed)
+                clipped(n, :) = plugin.Is * (exp(((plugin.DRIVE / 100 + 0.1) * pitchMixed(n, :)) / (plugin.eta * plugin.Vt)) - 1);
+            end
+
 
             % EQ processing for each band (low, mid, high)
+            filteredLow = zeros(size(clipped));
+            filteredMid = zeros(size(clipped));
+            filteredHigh = zeros(size(clipped));
             [filteredLow, plugin.lowFreqFilter] = plugin.filterProcess(clipped, plugin.lowFreqFilter);
             [filteredMid, plugin.midFreqFilter] = plugin.filterProcess(clipped, plugin.midFreqFilter);
             [filteredHigh, plugin.highFreqFilter] = plugin.filterProcess(clipped, plugin.highFreqFilter);
@@ -209,7 +217,7 @@ PluginInterface = audioPluginInterface(...
         end
 
 
-        function [out, updatedFilter] = filterProcess(plugin, in, filter)
+        function [output, updatedFilter] = filterProcess(plugin, in, filter)
             % Process filter using biquad structure
             out = zeros(size(in));
             for n = 1:length(in)
@@ -226,6 +234,7 @@ PluginInterface = audioPluginInterface(...
                 filter.y1 = out(n, :);
             end
             updatedFilter = filter; % Return the updated filter struct
+            output = out;
         end
 
 
