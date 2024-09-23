@@ -176,17 +176,23 @@ PluginInterface = audioPluginInterface(...
         lowFreqFilter = struct('w', [0 0 ; 0 0], 'a0', 1, 'a1', 0, 'a2', 0, 'b0', 1, 'b1', 0, 'b2', 0, 'x1', 0, 'x2', 0, 'y1', 0, 'y2', 0);
         midFreqFilter = struct('w', [0 0 ; 0 0], 'a0', 1, 'a1', 0, 'a2', 0, 'b0', 1, 'b1', 0, 'b2', 0, 'x1', 0, 'x2', 0, 'y1', 0, 'y2', 0);
         highFreqFilter = struct('w', [0 0 ; 0 0], 'a0', 1, 'a1', 0, 'a2', 0, 'b0', 1, 'b1', 0, 'b2', 0, 'x1', 0, 'x2', 0, 'y1', 0, 'y2', 0);
+
+        lowFreqSmoother;
+        midFreqSmoother;
+        highFreqSmoother;
     end
 
     methods
         function plugin = MrShifty()
             % Initialize Pitch Shifter
             plugin.PitchShifter = audiopluginexample.PitchShifter();
+            plugin.lowFreqSmoother = ParameterSmoother(plugin.LF_FREQ, 0.9);
+            plugin.midFreqSmoother = ParameterSmoother(plugin.MF_FREQ, 0.9);
+            plugin.highFreqSmoother = ParameterSmoother(plugin.HF_FREQ, 0.9);
         end
 
         function out = process(plugin, in)
             % DSP section
-            N = size(in, 1);
             out = coder.nullcopy(zeros(size(in)));
 
             % Mix factor for pitch shifting
@@ -205,42 +211,27 @@ PluginInterface = audioPluginInterface(...
 
 
             % EQ processing for each band (low, mid, high)
-            filteredLow = zeros(size(clipped));
-            filteredMid = zeros(size(clipped));
-            filteredHigh = zeros(size(clipped));
-            [filteredLow, plugin.lowFreqFilter] = plugin.filterProcess(clipped, plugin.lowFreqFilter);
-            [filteredMid, plugin.midFreqFilter] = plugin.filterProcess(filteredLow, plugin.midFreqFilter);
-            [filteredHigh, plugin.highFreqFilter] = plugin.filterProcess(filteredMid, plugin.highFreqFilter);
-
-            % Sum all filtered outputs (low, mid, high)
-            out = filteredHigh;
-        end
+            for ch = 1:min(size(clipped))
+       
+                x = clipped(:,ch);
+                
+                [x, plugin.lowFreqFilter.w(:,ch)] = processBiquad(x, plugin.lowFreqFilter, ch);
+                [x, plugin.midFreqFilter.w(:,ch)] = processBiquad(x, plugin.midFreqFilter, ch);
+                [x, plugin.highFreqFilter.w(:,ch)] = processBiquad(x, plugin.highFreqFilter, ch);
 
 
-        function [output, updatedFilter] = filterProcess(plugin, in, filter)
-            % Process filter using biquad structure
-            out = zeros(size(in));
-            for n = 1:length(in)
-                out(n, :) = (filter.b0/filter.a0) * in(n, :) + ...
-                    (filter.b1/filter.a0) * filter.x1 + ...
-                    (filter.b2/filter.a0) * filter.x2 + ...
-                    ((-1 * filter.a1)/filter.a0) * filter.y1 + ...
-                    ((-1 * filter.a2)/filter.a0) * filter.y2;
-
-                % Update filter states
-                filter.x2 = filter.x1;
-                filter.x1 = in(n, :);
-                filter.y2 = filter.y1;
-                filter.y1 = out(n, :);
             end
-            updatedFilter = filter; % Return the updated filter struct
-            output = out;
+            % Sum all filtered outputs (low, mid, high)
+            out = x;
         end
 
 
         function reset(plugin)
             % Called when sample rate changes or plugin is reloaded
             plugin.FS = getSampleRate(plugin);
+            plugin.lowFreqFilter.w = [0 0; 0 0];
+            plugin.midFreqFilter.w = [0 0; 0 0];
+            plugin.highFreqFilter.w = [0 0; 0 0];
         end
 
         function set.PITCHSHIFT(plugin, val)
@@ -261,66 +252,103 @@ PluginInterface = audioPluginInterface(...
         % Low Frequency EQ updates
         function set.LF_FREQ(plugin, val)
             plugin.LF_FREQ = val;
-            update_LF(plugin);
+            plugin.lowFreqSmoother.setTargetValue(val);
+            updateLowFreqFilter(plugin);
+        end
+        
+        function set.LF_Q(plugin, val)
+            plugin.LF_Q = val;
+            updateLowFreqFilter(plugin);
         end
 
         function set.LF_GAIN(plugin, val)
             plugin.LF_GAIN = val;
-            update_LF(plugin);
+            updateLowFreqFilter(plugin);
         end
 
-        function update_LF(plugin)
-            plugin.updateFilter(plugin.lowFreqFilter, plugin.LF_FREQ, plugin.LF_GAIN, plugin.LF_Q);
+        function updateLowFreqFilter(plugin)
+
+            Q=plugin.LF_Q;
+            f0=plugin.midFreqSmoother.step();
+            gain = plugin.LF_GAIN;
+            w0=2*pi*f0/plugin.FS;
+            alpha=sin(w0)/(2*Q);
+            A=sqrt(db2mag(gain));
+
+            plugin.lowFreqFilter.a0 =   1 + alpha*A;
+            plugin.lowFreqFilter.a1 =  -2*cos(w0);
+            plugin.lowFreqFilter.a2 =   1 - alpha*A;
+            plugin.lowFreqFilter.b0 =   1 + alpha/A;
+            plugin.lowFreqFilter.b1 =  -2*cos(w0);
+            plugin.lowFreqFilter.b2 =   1 - alpha/A;
         end
 
         % Mid Frequency EQ updates
         function set.MF_FREQ(plugin, val)
             plugin.MF_FREQ = val;
-            update_MF(plugin);
+            plugin.midFreqSmoother.setTargetValue(val);
+            updateMidFreqFilter(plugin);
         end
 
         function set.MF_GAIN(plugin, val)
             plugin.MF_GAIN = val;
-            update_MF(plugin);
+            updateMidFreqFilter(plugin);
         end
 
-        function update_MF(plugin)
-            plugin.updateFilter(plugin.midFreqFilter, plugin.MF_FREQ, plugin.MF_GAIN, plugin.MF_Q);
+        function set.MF_Q(plugin, val)
+            plugin.MF_Q = val;
+            updateMidFreqFilter(plugin);
+        end
+
+        function updateMidFreqFilter(plugin)
+
+             Q=plugin.MF_Q;
+             f0=plugin.midFreqSmoother.step();
+             gain = plugin.MF_GAIN;
+             w0=2*pi*f0/plugin.FS;
+             alpha=sin(w0)/(2*Q);
+             A=sqrt(db2mag(gain));
+
+             plugin.midFreqFilter.a0 =   1 + alpha*A;
+             plugin.midFreqFilter.a1 =  -2*cos(w0);
+             plugin.midFreqFilter.a2 =   1 - alpha*A;
+             plugin.midFreqFilter.b0 =   1 + alpha/A;
+             plugin.midFreqFilter.b1 =  -2*cos(w0);
+             plugin.midFreqFilter.b2 =   1 - alpha/A;
         end
 
         % High Frequency EQ updates
         function set.HF_FREQ(plugin, val)
             plugin.HF_FREQ = val;
-            update_HF(plugin);
+            plugin.highFreqSmoother.setTargetValue(val);
+            updateHighFreqFilter(plugin);
+        end
+        
+        function set.HF_Q(plugin, val)
+            plugin.HF_Q = val;
+            updateHighFreqFilter(plugin);
         end
 
         function set.HF_GAIN(plugin, val)
             plugin.HF_GAIN = val;
-            update_HF(plugin);
+            updateHighFreqFilter(plugin);
         end
 
-        function update_HF(plugin)
-            plugin.updateFilter(plugin.highFreqFilter, plugin.HF_FREQ, plugin.HF_GAIN, plugin.HF_Q);
-        end
+        function updateHighFreqFilter(plugin)
 
-        % Filter update method
-        function updateFilter(plugin, filter, freq, gain, Q)
-            % Calculate biquad coefficients
-            A = db2mag(gain);
-            omega = 2 * pi * freq / plugin.FS;
-            alpha = sin(omega) / (2 * Q);
-            cos_w = cos(omega);
-            
-            % Ensure stability
-            %alpha = max(min(alpha, 1.0), 0.0001);
-            
-            % Peaking EQ coefficients
-            filter.b0 = 1 + alpha * A;
-            filter.b1 = -2 * cos_w;
-            filter.b2 = 1 - alpha * A;
-            filter.a0 = 1 + alpha / A;
-            filter.a1 = -2 * cos_w;
-            filter.a2 = 1 - alpha / A;
+            Q=plugin.HF_Q;
+            f0=plugin.highFreqSmoother.step();
+            gain = plugin.HF_GAIN;
+            w0=2*pi*f0/plugin.FS;
+            alpha=sin(w0)/(2*Q);
+            A=sqrt(db2mag(gain));
+
+            plugin.highFreqFilter.a0 =   1 + alpha*A;
+            plugin.highFreqFilter.a1 =  -2*cos(w0);
+            plugin.highFreqFilter.a2 =   1 - alpha*A;
+            plugin.highFreqFilter.b0 =   1 + alpha/A;
+            plugin.highFreqFilter.b1 =  -2*cos(w0);
+            plugin.highFreqFilter.b2 =   1 - alpha/A;
         end
     end
 end
