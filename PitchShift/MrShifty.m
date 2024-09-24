@@ -17,7 +17,7 @@ classdef MrShifty < audioPlugin
         % Valid ranges are from -12 to 12
         PITCHSHIFT = 0;
         % Delay line overlap
-        OVERLAP = 0.45;
+        OVERLAY = 0.45;
         %Pitch Mix
         PITCHSHIFT_MIX = 50.0;
         %Drive
@@ -42,8 +42,8 @@ PluginInterface = audioPluginInterface(...
                 Style="rotaryknob", Layout=[5 8], ...
                 Filmstrip = 'dial.png', ...
                 FilmstripFrameSize = [70 70]), ...
-                audioPluginParameter("OVERLAP", ...
-                DisplayName="CPU Load", ...
+                audioPluginParameter("OVERLAY", ...
+                DisplayName="Overlay", ...
                 DisplayNameLocation="above", ...
                 Mapping={"lin",.01,.5}, ...
                 Style="rotaryknob", Layout=[5 12], ...
@@ -166,11 +166,15 @@ PluginInterface = audioPluginInterface(...
 
         % Pitch Shifter
         PitchShifter;
-
+        pitchMixSmoother;
+        pitchSmoother;
+        overlaySmoother;
         % Diode clipping parameters
         Vt = 0.0253;
         eta = 1.68;
         Is = 0.105;
+
+        driveSmoother;
 
         % Filter structures with persistent variables
         lowFreqFilter = struct('w', [0 0 ; 0 0], 'a0', 1, 'a1', 0, 'a2', 0, 'b0', 1, 'b1', 0, 'b2', 0, 'x1', 0, 'x2', 0, 'y1', 0, 'y2', 0);
@@ -178,17 +182,37 @@ PluginInterface = audioPluginInterface(...
         highFreqFilter = struct('w', [0 0 ; 0 0], 'a0', 1, 'a1', 0, 'a2', 0, 'b0', 1, 'b1', 0, 'b2', 0, 'x1', 0, 'x2', 0, 'y1', 0, 'y2', 0);
 
         lowFreqSmoother;
+        lowFreqGainSmoother;
+        lowFreqQSmoother;
         midFreqSmoother;
+        midFreqGainSmoother;
+        midFreqQSmoother;
         highFreqSmoother;
+        highFreqGainSmoother;
+        highFreqQSmoother;
     end
 
     methods
         function plugin = MrShifty()
             % Initialize Pitch Shifter
             plugin.PitchShifter = audiopluginexample.PitchShifter();
+            plugin.pitchMixSmoother = ParameterSmoother(plugin.PITCHSHIFT_MIX, 0.5);
+            plugin.pitchSmoother = ParameterSmoother(plugin.PITCHSHIFT, 0.9);
+            plugin.overlaySmoother = ParameterSmoother(plugin.OVERLAY, 0.9);
+            %initialize LF param smoother
             plugin.lowFreqSmoother = ParameterSmoother(plugin.LF_FREQ, 0.9);
+            plugin.lowFreqGainSmoother = ParameterSmoother(plugin.LF_GAIN, 0.9);
+            plugin.lowFreqQSmoother = ParameterSmoother(plugin.LF_Q, 0.9);
+            %initialize mf param smoother
             plugin.midFreqSmoother = ParameterSmoother(plugin.MF_FREQ, 0.9);
+            plugin.midFreqGainSmoother = ParameterSmoother(plugin.MF_GAIN, 0.9);
+            plugin.midFreqQSmoother = ParameterSmoother(plugin.MF_Q, 0.9);
+            %initialize hf param smoother
             plugin.highFreqSmoother = ParameterSmoother(plugin.HF_FREQ, 0.9);
+            plugin.highFreqGainSmoother = ParameterSmoother(plugin.HF_GAIN, 0.9);
+            plugin.highFreqQSmoother = ParameterSmoother(plugin.HF_Q, 0.9);
+            %Initialize drive
+            plugin.driveSmoother = ParameterSmoother(plugin.DRIVE, 0.2);
         end
 
         function out = process(plugin, in)
@@ -234,19 +258,37 @@ PluginInterface = audioPluginInterface(...
             plugin.highFreqFilter.w = [0 0; 0 0];
         end
 
+        % Drive params
+
+        function set.DRIVE(plugin, val)
+            plugin.DRIVE = val;
+            plugin.driveSmoother.setTargetValue(val);
+            plugin.driveSmoother.step();
+        end
+
         function set.PITCHSHIFT(plugin, val)
             plugin.PITCHSHIFT = val;
+            plugin.pitchSmoother.setTargetValue(val);
+            plugin.pitchSmoother.step();
             updatePitchShifter(plugin);
         end
 
-        function set.OVERLAP(plugin, val)
-            plugin.OVERLAP = val;
+        function set.OVERLAY(plugin, val)
+            plugin.OVERLAY = val;
+            plugin.overlaySmoother.setTargetValue(val);
+            plugin.overlaySmoother.step();
             updatePitchShifter(plugin);
+        end
+
+        function set.PITCHSHIFT_MIX(plugin, val)
+            plugin.PITCHSHIFT_MIX = val;
+            plugin.pitchMixSmoother.setTargetValue(val);
+            plugin.pitchMixSmoother.step();
         end
 
         function updatePitchShifter(plugin)
             plugin.PitchShifter.PitchShift = plugin.PITCHSHIFT;
-            plugin.PitchShifter.Overlap = plugin.OVERLAP;
+            plugin.PitchShifter.Overlap = plugin.OVERLAY;
         end
 
         % Low Frequency EQ updates
@@ -258,19 +300,21 @@ PluginInterface = audioPluginInterface(...
         
         function set.LF_Q(plugin, val)
             plugin.LF_Q = val;
+            plugin.lowFreqQSmoother.setTargetValue(val);
             updateLowFreqFilter(plugin);
         end
 
         function set.LF_GAIN(plugin, val)
             plugin.LF_GAIN = val;
+            plugin.lowFreqGainSmoother.setTargetValue(val);
             updateLowFreqFilter(plugin);
         end
 
         function updateLowFreqFilter(plugin)
 
-            Q=plugin.LF_Q;
-            f0=plugin.midFreqSmoother.step();
-            gain = plugin.LF_GAIN;
+            Q=plugin.lowFreqQSmoother.step();
+            f0=plugin.lowFreqSmoother.step();
+            gain = plugin.lowFreqGainSmoother.step();
             w0=2*pi*f0/plugin.FS;
             alpha=sin(w0)/(2*Q);
             A=sqrt(db2mag(gain));
@@ -292,29 +336,31 @@ PluginInterface = audioPluginInterface(...
 
         function set.MF_GAIN(plugin, val)
             plugin.MF_GAIN = val;
+            plugin.midFreqGainSmoother.setTargetValue(val);
             updateMidFreqFilter(plugin);
         end
 
         function set.MF_Q(plugin, val)
             plugin.MF_Q = val;
+            plugin.midFreqQSmoother.setTargetValue(val);
             updateMidFreqFilter(plugin);
         end
 
         function updateMidFreqFilter(plugin)
 
-             Q=plugin.MF_Q;
-             f0=plugin.midFreqSmoother.step();
-             gain = plugin.MF_GAIN;
-             w0=2*pi*f0/plugin.FS;
-             alpha=sin(w0)/(2*Q);
-             A=sqrt(db2mag(gain));
+            Q=plugin.midFreqQSmoother.step();
+            f0=plugin.midFreqSmoother.step();
+            gain = plugin.midFreqGainSmoother.step();
+            w0=2*pi*f0/plugin.FS;
+            alpha=sin(w0)/(2*Q);
+            A=sqrt(db2mag(gain));
 
-             plugin.midFreqFilter.a0 =   1 + alpha*A;
-             plugin.midFreqFilter.a1 =  -2*cos(w0);
-             plugin.midFreqFilter.a2 =   1 - alpha*A;
-             plugin.midFreqFilter.b0 =   1 + alpha/A;
-             plugin.midFreqFilter.b1 =  -2*cos(w0);
-             plugin.midFreqFilter.b2 =   1 - alpha/A;
+            plugin.midFreqFilter.a0 =   1 + alpha*A;
+            plugin.midFreqFilter.a1 =  -2*cos(w0);
+            plugin.midFreqFilter.a2 =   1 - alpha*A;
+            plugin.midFreqFilter.b0 =   1 + alpha/A;
+            plugin.midFreqFilter.b1 =  -2*cos(w0);
+            plugin.midFreqFilter.b2 =   1 - alpha/A;
         end
 
         % High Frequency EQ updates
@@ -326,19 +372,21 @@ PluginInterface = audioPluginInterface(...
         
         function set.HF_Q(plugin, val)
             plugin.HF_Q = val;
+            plugin.highFreqQSmoother.setTargetValue(val);
             updateHighFreqFilter(plugin);
         end
 
         function set.HF_GAIN(plugin, val)
             plugin.HF_GAIN = val;
+            plugin.highFreqGainSmoother.setTargetValue(val);
             updateHighFreqFilter(plugin);
         end
 
         function updateHighFreqFilter(plugin)
 
-            Q=plugin.HF_Q;
+            Q=plugin.highFreqQSmoother.step();
             f0=plugin.highFreqSmoother.step();
-            gain = plugin.HF_GAIN;
+            gain = plugin.highFreqGainSmoother.step();
             w0=2*pi*f0/plugin.FS;
             alpha=sin(w0)/(2*Q);
             A=sqrt(db2mag(gain));
