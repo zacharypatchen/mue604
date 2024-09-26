@@ -156,7 +156,8 @@ PluginInterface = audioPluginInterface(...
                 'Mapping', {'lin', 1.0, 100.0}, ...
                 'Filmstrip', 'BigKnob.png',...
                 'FilmstripFrameSize', [89 89]),...
-                'BackgroundImage','PatchBackground.jpg')
+                'BackgroundColor', 'g')
+                %'BackgroundImage','PatchBackground.jpg')
         % end of interface
     end
 
@@ -226,28 +227,28 @@ PluginInterface = audioPluginInterface(...
             shiftedSignal = plugin.PitchShifter(in);
             pitchMixed = (1 - mixFactor) * in + mixFactor * shiftedSignal;
 
-            % Diode clipping 
+            % Diode clipping
             clipped = zeros(size(pitchMixed)); % Preallocate the clipped signal
 
             for n = 1:length(pitchMixed)
                 clipped(n, :) = plugin.Is * (exp(((plugin.DRIVE / 100 + 0.1) * pitchMixed(n, :)) / (plugin.eta * plugin.Vt)) - 1);
             end
 
+            x = zeros(size(clipped));  % Preallocate correctly sized array for all channels
 
-            % EQ processing for each band (low, mid, high)
-            for ch = 1:min(size(clipped))
-       
-                x = clipped(:,ch);
-                
-                [x, plugin.lowFreqFilter.w(:,ch)] = processBiquad(x, plugin.lowFreqFilter, ch);
-                [x, plugin.midFreqFilter.w(:,ch)] = processBiquad(x, plugin.midFreqFilter, ch);
-                [x, plugin.highFreqFilter.w(:,ch)] = processBiquad(x, plugin.highFreqFilter, ch);
-
-
+            % EQ processing for each band (low, mid, high) per channel
+            for ch = 1:size(clipped, 2)  % Iterate over each channel
+                channelData = clipped(:, ch);  % Extract data for current channel
+                [channelData, plugin.lowFreqFilter.w(:,ch)] = processBiquad(channelData, plugin.lowFreqFilter, ch);
+                [channelData, plugin.midFreqFilter.w(:,ch)] = processBiquad(channelData, plugin.midFreqFilter, ch);
+                [channelData, plugin.highFreqFilter.w(:,ch)] = processBiquad(channelData, plugin.highFreqFilter, ch);
+                x(:, ch) = channelData;  % Assign processed data back to x
             end
+
             % Sum all filtered outputs (low, mid, high)
-            out = x;
+            out = x;  % Assign the complete processed signal to out
         end
+
 
 
         function reset(plugin)
